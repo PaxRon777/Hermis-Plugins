@@ -1,0 +1,6 @@
+{
+  "id": "obsidian-vault-search",
+  "name": "obsidian-vault-search",
+  "api": "plugin_api.py",
+  "version": "1.0.0"
+}
