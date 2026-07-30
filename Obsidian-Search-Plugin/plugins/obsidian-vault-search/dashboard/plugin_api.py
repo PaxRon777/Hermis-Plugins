@@ -19,15 +19,28 @@ VAULT_PATH = os.environ.get(
 )
 
 
-def _get_vault_path() -> str:
-    """Resolve vault path from env or fallback."""
+def _get_vault_path(custom_path: str = None) -> str:
+    """Resolve vault path from custom path, env, or fallback."""
+    if custom_path:
+        return custom_path
     return VAULT_PATH
 
 
-def search_files(query: str, limit: int = 20) -> list[dict[str, Any]]:
-    """Search vault by filename (case-insensitive)."""
-    vault = Path(_get_vault_path())
+def _validate_vault(vault_path: str = None) -> tuple[Path | None, str | None]:
+    """Validate that the path exists and is an Obsidian vault. Returns (vault_path, error_message)."""
+    vault = Path(_get_vault_path(vault_path))
     if not vault.exists():
+        return None, "Vault not found at this path"
+    obsidian_dir = vault / ".obsidian"
+    if not obsidian_dir.is_dir():
+        return None, "Not an Obsidian vault — missing .obsidian folder"
+    return vault, None
+
+
+def search_files(query: str, limit: int = 20, vault_path: str = None) -> list[dict[str, Any]]:
+    """Search vault by filename (case-insensitive)."""
+    vault, error = _validate_vault(vault_path)
+    if error:
         return []
 
     results = []
@@ -46,10 +59,10 @@ def search_files(query: str, limit: int = 20) -> list[dict[str, Any]]:
     return results
 
 
-def search_content(query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search_content(query: str, limit: int = 20, vault_path: str = None) -> list[dict[str, Any]]:
     """Search vault note contents for a query string."""
-    vault = Path(_get_vault_path())
-    if not vault.exists():
+    vault, error = _validate_vault(vault_path)
+    if error:
         return []
 
     results = []
@@ -78,11 +91,11 @@ def search_content(query: str, limit: int = 20) -> list[dict[str, Any]]:
     return results
 
 
-def get_vault_structure(max_depth: int = 3) -> str:
+def get_vault_structure(max_depth: int = 3, vault_path: str = None) -> str:
     """Get the vault folder structure as a tree string."""
-    vault = Path(_get_vault_path())
-    if not vault.exists():
-        return f"Vault not found at {_get_vault_path()}"
+    vault, error = _validate_vault(vault_path)
+    if error:
+        return f"{error}: {_get_vault_path(vault_path)}"
 
     lines = [str(vault)]
     _build_tree(vault, lines, 1, max_depth)
@@ -120,9 +133,9 @@ def _build_tree(dirpath: Path, lines: list[str], depth: int, max_depth: int):
         lines.append(f"{indent}└── ... and {remaining} more")
 
 
-def open_in_obsidian(file_path: str) -> dict[str, Any]:
+def open_in_obsidian(file_path: str, vault_path: str = None) -> dict[str, Any]:
     """Attempt to open a file in Obsidian."""
-    vault = Path(_get_vault_path())
+    vault = Path(_get_vault_path(vault_path))
     obsidian_path = Path(file_path)
 
     # Build the vault-relative path for the obsidian:// URI
@@ -148,18 +161,19 @@ def open_in_obsidian(file_path: str) -> dict[str, Any]:
 async def search_endpoint(
     query: str = Body(..., embed=True),
     limit: int = Body(20, embed=True),
-    search_type: str = Body("all", embed=True)  # 'all' | 'files' | 'content'
+    search_type: str = Body("all", embed=True),  # 'all' | 'files' | 'content'
+    vault_path: str = Body(None, embed=True)
 ) -> dict[str, Any]:
     """Main search endpoint. Returns file matches + content matches based on search_type."""
-    results = {"structure": get_vault_structure()}
+    results = {"structure": get_vault_structure(vault_path=vault_path)}
     
     if search_type in ("all", "files"):
-        results["files"] = search_files(query, limit)
+        results["files"] = search_files(query, limit, vault_path)
     else:
         results["files"] = []
     
     if search_type in ("all", "content"):
-        results["content"] = search_content(query, limit)
+        results["content"] = search_content(query, limit, vault_path)
     else:
         results["content"] = []
     
@@ -167,34 +181,34 @@ async def search_endpoint(
 
 
 @router.get("/structure")
-async def get_structure(max_depth: int = Query(3)) -> str:
+async def get_structure(max_depth: int = Query(3), vault_path: str = Query(None)) -> str:
     """Return vault folder structure."""
-    return get_vault_structure(max_depth)
+    return get_vault_structure(max_depth, vault_path)
 
 
 @router.post("/open")
-async def open_file(file_path: str = Body(..., embed=True)) -> dict[str, Any]:
+async def open_file(file_path: str = Body(..., embed=True), vault_path: str = Body(None, embed=True)) -> dict[str, Any]:
     """Open a vault file in Obsidian."""
-    return open_in_obsidian(file_path)
+    return open_in_obsidian(file_path, vault_path)
 
 
 @router.post("/read")
-async def read_file_post(file_path: str = Body(..., embed=True)) -> dict[str, Any]:
+async def read_file_post(file_path: str = Body(..., embed=True), vault_path: str = Body(None, embed=True)) -> dict[str, Any]:
     """Read a vault file's content (POST)."""
-    return await read_file(file_path)
+    return await read_file(file_path, vault_path)
 
 
 @router.get("/read")
-async def read_file_get(file_path: str = Query(...)) -> dict[str, Any]:
+async def read_file_get(file_path: str = Query(...), vault_path: str = Query(None)) -> dict[str, Any]:
     """Read a vault file's content (GET)."""
-    return await read_file(file_path)
+    return await read_file(file_path, vault_path)
 
 
-async def read_file(file_path: str) -> dict[str, Any]:
+async def read_file(file_path: str, vault_path: str = None) -> dict[str, Any]:
     """Read a vault file's content."""
-    vault = Path(_get_vault_path())
-    if not vault.exists():
-        return {"content": "Vault not found", "error": "Vault not found"}
+    vault, error = _validate_vault(vault_path)
+    if error:
+        return {"content": error, "error": error}
     
     file_path = Path(file_path)
     try:
@@ -213,12 +227,15 @@ async def read_file(file_path: str) -> dict[str, Any]:
         return {"content": "", "error": f"Error reading file: {str(e)}"}
 
 
-@router.get("/info")
-async def get_vault_info() -> dict[str, Any]:
-    """Return vault metadata."""
-    vault = Path(_get_vault_path())
-    if not vault.exists():
-        return {"exists": False, "path": str(vault)}
+def _build_vault_info(vault_path: str | None) -> dict[str, Any]:
+    """Build vault metadata payload for the given (or default) path."""
+    vault, error = _validate_vault(vault_path)
+    if error:
+        return {
+            "exists": False,
+            "path": str(_get_vault_path(vault_path)),
+            "reason": "not_an_obsidian_vault" if "missing .obsidian" in error else "not_found",
+        }
 
     md_files = list(vault.rglob("*.md"))
     folders = [d for d in vault.iterdir() if d.is_dir() and not d.name.startswith('.')]
@@ -233,3 +250,19 @@ async def get_vault_info() -> dict[str, Any]:
             for f in sorted(md_files, key=lambda x: x.stat().st_mtime, reverse=True)[:10]
         ],
     }
+
+
+@router.get("/info")
+async def get_vault_info(vault_path: str = Query(None)) -> dict[str, Any]:
+    """Return vault metadata (GET). vault_path comes from the query string."""
+    return _build_vault_info(vault_path)
+
+
+@router.post("/info")
+async def get_vault_info_post(vault_path: str = Body(None, embed=True)) -> dict[str, Any]:
+    """Return vault metadata (POST). vault_path comes from the request body.
+
+    The desktop plugin SDK's `ctx.rest` does not support query-string params,
+    so the settings dialog POSTs the path here for validation.
+    """
+    return _build_vault_info(vault_path)

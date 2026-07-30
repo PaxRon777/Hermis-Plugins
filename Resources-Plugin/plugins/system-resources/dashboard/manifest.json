@@ -1,0 +1,10 @@
+{
+  "name": "system-resources",
+  "displayName": "System Resources Monitor",
+  "version": "1.0.0",
+  "description": "Real-time CPU, RAM, GPU, and VRAM monitoring for Hermes Desktop",
+  "api": "plugin_api.py",
+  "enabled": true,
+  "author": "Pax",
+  "license": "MIT"
+}

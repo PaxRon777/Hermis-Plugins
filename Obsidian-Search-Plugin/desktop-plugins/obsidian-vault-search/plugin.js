@@ -4,17 +4,154 @@
  * Features:
  * - Search vault by filename and content
  * - Side panel showing search results with metadata
- * - Insert vault folder structure into the prompt
  * - Open notes in Hermes preview pane
  * - Copy file paths (full and relative)
  * - Display file content in the plugin pane
+ * - Configurable vault path (persisted in plugin storage)
  */
-import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Tip, cn, haptic, host, usePluginI18n, useValue, Codicon } from '@hermes/plugin-sdk'
-import { useState } from 'react'
+import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Tip, cn, haptic, host, usePluginI18n, useValue, Codicon, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@hermes/plugin-sdk'
+import { useState, useEffect } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'obsidian-vault-search'
-const VAULT_PATH = 'C:\\Users\\paulm\\OneDrive\\AI\\KnowledgeBase'
+const DEFAULT_VAULT_PATH = 'C:\\Users\\paulm\\OneDrive\\AI\\KnowledgeBase'
+
+// ─── Settings Dialog ─────────────────────────────────────────────────────────
+function SettingsDialog({ isOpen, onClose, ctx }) {
+  const t = usePluginI18n(ID)
+  const [vaultPath, setVaultPath] = useState(DEFAULT_VAULT_PATH)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState(null)
+  const [testPassed, setTestPassed] = useState(false)
+
+  // Load saved path when dialog opens
+  const loadPath = async () => {
+    const saved = await ctx.storage.get('vaultPath')
+    if (saved) setVaultPath(saved)
+  }
+
+  // Call loadPath when dialog opens
+  useEffect(() => {
+    if (isOpen) {
+      loadPath()
+    }
+  }, [isOpen])
+
+  // Reset test state when path changes
+  const handlePathChange = (e) => {
+    setVaultPath(e.target.value)
+    setTestResult(null)
+    setTestPassed(false)
+  }
+
+  const savePath = async () => {
+    await ctx.storage.set('vaultPath', vaultPath)
+    host.notify({ kind: 'success', message: t('settingsSaved') })
+    onClose()
+  }
+
+  const testPath = async () => {
+    setTesting(true)
+    setTestResult(null)
+    setTestPassed(false)
+    try {
+      // Test the exact path in the input field (don't fall back)
+      const pathToTest = vaultPath.trim()
+      if (!pathToTest) {
+        setTestResult({ success: false, message: t('testNotFound') })
+        setTesting(false)
+        return
+      }
+
+      // The Hermes plugin SDK's `ctx.rest` does not support query-string
+      // params on GET, so POST the path in the body to the matching
+      // `POST /info` endpoint on the backend.
+      const result = await ctx.rest('/info', {
+        method: 'POST',
+        body: { vault_path: pathToTest }
+      })
+      if (result.exists) {
+        setTestResult({ success: true, message: t('testSuccess').replace('{0}', String(result.total_notes)) })
+        setTestPassed(true)
+      } else if (result.reason === 'not_an_obsidian_vault') {
+        setTestResult({ success: false, message: t('testNotVault') })
+      } else {
+        setTestResult({ success: false, message: t('testNotFound') })
+      }
+    } catch (err) {
+      setTestResult({ success: false, message: t('testError').replace('{0}', err.message) })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return jsx(Dialog, {
+    open: isOpen,
+    onOpenChange: (open) => { if (!open) onClose() },
+    children: jsxs(DialogContent, {
+      className: 'max-w-md',
+      children: [
+        jsx(DialogHeader, {
+          children: [
+            jsx(DialogTitle, { children: t('settingsTitle') }),
+            jsx(DialogDescription, { children: t('settingsDesc') })
+          ]
+        }),
+        jsxs('div', {
+          className: 'space-y-4',
+          children: [
+            jsxs('div', {
+              className: 'space-y-2',
+              children: [
+                jsx('label', { className: 'text-sm font-medium', children: t('vaultPathLabel') }),
+                jsx(Input, {
+                  value: vaultPath,
+                  onChange: handlePathChange,
+                  placeholder: t('vaultPathPlaceholder'),
+                  className: 'font-mono text-xs'
+                }),
+                jsxs('div', {
+                  className: 'flex gap-2',
+                  children: [
+                    jsx(Button, {
+                      onClick: testPath,
+                      disabled: testing,
+                      variant: 'outline',
+                      size: 'sm',
+                      children: testing ? t('testing') : t('testPath')
+                    }),
+                    testResult && jsx('span', {
+                      className: cn('text-xs flex-1', { color: testResult.success ? 'var(--ui-accent)' : 'var(--ui-destructive)' }),
+                      children: testResult.message
+                    })
+                  ]
+                })
+              ]
+            }),
+            jsx('p', {
+              className: cn('text-xs', { color: 'var(--ui-text-quaternary)' }),
+              children: t('settingsNote')
+            })
+          ]
+        }),
+        jsx(DialogFooter, {
+          children: [
+            jsx(Button, {
+              variant: 'ghost',
+              onClick: onClose,
+              children: t('cancel')
+            }),
+            jsx(Button, {
+              onClick: savePath,
+              disabled: !testPassed,
+              children: t('save')
+            })
+          ]
+        })
+      ]
+    })
+  })
+}
 
 // ─── Search Pane Component ──────────────────────────────────────────────────
 function VaultSearchPane({ ctx }) {
@@ -25,18 +162,20 @@ function VaultSearchPane({ ctx }) {
   const [loading, setLoading] = useState(false)
   const [searchType, setSearchType] = useState('all') // 'all' | 'files' | 'content'
   const [selectedFile, setSelectedFile] = useState(null)
+  const [showSettings, setShowSettings] = useState(false)
 
   const handleSearch = async () => {
     if (!query.trim()) return
     haptic('tap')
     setLoading(true)
     try {
+      const savedVaultPath = await ctx.storage.get('vaultPath')
       const data = await ctx.rest('/search', {
         method: 'POST',
-        body: { query: query.trim(), limit: 20, search_type: searchType }
+        body: { query: query.trim(), limit: 20, search_type: searchType, vault_path: savedVaultPath || DEFAULT_VAULT_PATH }
       })
       setResults(data)
-      setSelectedFile(null) // Clear selection on new search
+      setSelectedFile(null)
       host.notify({ kind: 'success', message: `Found ${(data.files?.length || 0) + (data.content?.length || 0)} results` })
     } catch (err) {
       host.notify({ kind: 'error', message: 'Search failed: ' + err.message })
@@ -47,13 +186,22 @@ function VaultSearchPane({ ctx }) {
 
   const handleOpenFile = async (filePath) => {
     haptic('tap')
-    // Fetch and display file content in the plugin pane
     try {
+      const savedVaultPath = await ctx.storage.get('vaultPath')
+      const vaultRoot = savedVaultPath || DEFAULT_VAULT_PATH
+      // Compute vault-relative path client-side so the "copy relative path"
+      // button works in the file viewer too. Normalize separators.
+      let relPath = filePath
+      const normalizedFile = filePath.replace(/\\/g, '/')
+      const normalizedVault = vaultRoot.replace(/\\/g, '/').replace(/\/$/, '')
+      if (normalizedFile.toLowerCase().startsWith(normalizedVault.toLowerCase() + '/')) {
+        relPath = normalizedFile.slice(normalizedVault.length + 1)
+      }
       const data = await ctx.rest('/read', {
         method: 'POST',
-        body: { file_path: filePath }
+        body: { file_path: filePath, vault_path: vaultRoot }
       })
-      setSelectedFile({ path: filePath, content: data.content || data.error || 'No content' })
+      setSelectedFile({ path: filePath, rel_path: relPath, content: data.content || data.error || 'No content' })
     } catch (err) {
       host.notify({ kind: 'error', message: 'Failed to read file: ' + err.message })
     }
@@ -94,9 +242,20 @@ function VaultSearchPane({ ctx }) {
       jsxs('div', {
         className: cn('p-3 border-b', { borderColor: 'var(--ui-stroke-secondary)' }),
         children: [
-          jsx('div', {
-            className: cn('text-sm font-medium mb-2', { color: 'var(--ui-text-primary)' }),
-            children: t('paneTitle')
+          jsxs('div', {
+            className: 'flex items-center justify-between mb-2',
+            children: [
+              jsx('div', {
+                className: cn('text-sm font-medium', { color: 'var(--ui-text-primary)' }),
+                children: t('paneTitle')
+              }),
+              jsx(Button, {
+                variant: 'ghost',
+                size: 'icon-sm',
+                onClick: () => setShowSettings(true),
+                children: jsx(Codicon, { name: 'gear', size: '1rem' })
+              })
+            ]
           }),
           jsxs('div', {
             className: 'flex gap-2 mb-2',
@@ -147,7 +306,6 @@ function VaultSearchPane({ ctx }) {
       jsx('div', {
         className: 'flex-1 overflow-y-auto p-3',
         children: selectedFile ? (
-          // File content view
           jsxs('div', {
             className: 'flex h-full flex-col',
             children: [
@@ -158,7 +316,7 @@ function VaultSearchPane({ ctx }) {
                     className: cn('flex-1 font-medium truncate text-left', { color: 'var(--ui-text-primary)' }),
                     children: selectedFile.path.split('\\').pop() || selectedFile.path.split('/').pop()
                   }),
-                  renderCopyButtons(selectedFile.path, selectedFile.path),
+                  renderCopyButtons(selectedFile.path, selectedFile.rel_path || selectedFile.path),
                   jsx(Button, {
                     onClick: () => setSelectedFile(null),
                     variant: 'ghost',
@@ -225,7 +383,7 @@ function VaultSearchPane({ ctx }) {
                               jsx(Button, {
                                 onClick: () => handleOpenFile(match.path),
                                 variant: 'ghost',
-                                className: 'w-full text-left p-2 rounded-t-md border-b',
+                                className: 'w-full text-left p-2 rounded-t-md border-b justify-start',
                                 style: { borderColor: 'var(--ui-stroke-secondary)' },
                                 children: jsxs('div', {
                                   className: 'flex flex-col gap-0.5 min-w-0',
@@ -274,6 +432,13 @@ function VaultSearchPane({ ctx }) {
             })
           })
         )
+      }),
+
+      // Settings Dialog
+      jsx(SettingsDialog, {
+        isOpen: showSettings,
+        onClose: () => setShowSettings(false),
+        ctx: ctx
       })
     ]
   })
@@ -310,12 +475,36 @@ export default {
         paneTitle: 'Vault Search',
         searchPlaceholder: 'Search vault by filename or content...',
         searchButton: 'Search',
-        insertStructure: 'Insert Vault Structure',
-        vaultInfo: 'Vault Info',
         searchHint: 'Type to search your Obsidian vault',
         chipTip: 'Obsidian Vault Search \u2014 click for info',
         chipMessage: 'Search your vault, open notes in preview, and insert folder structure into prompts.',
-        vaultInfoMessage: 'Vault: C:\\Users\\paulm\\OneDrive\\AI\\KnowledgeBase'
+        settingsTitle: 'Vault Settings',
+        settingsDesc: 'Configure the path to your Obsidian vault.',
+        vaultPathLabel: 'Vault Path',
+        vaultPathPlaceholder: 'C:\\Users\\you\\Documents\\ObsidianVault',
+        testPath: 'Test Path',
+        testing: 'Testing...',
+        testSuccess: 'Found {0} notes',
+        testNotFound: 'Vault not found at this path',
+        testNotVault: 'Not an Obsidian vault — missing .obsidian folder',
+        testError: 'Error: {0}',
+        settingsSaved: 'Settings saved. Changes take effect after restart.',
+        settingsNote: 'Changes take effect after restart. The path is stored per-profile.',
+        cancel: 'Cancel',
+        save: 'Save',
+        searchHint: 'Type to search your Obsidian vault'
+      }
+    })
+
+    // Register settings command
+    ctx.register({
+      id: 'open-settings',
+      area: 'PALETTE_AREA',
+      title: 'Obsidian Vault Search: Settings',
+      data: { category: 'Obsidian Vault Search' },
+      onSelect: () => {
+        // The pane will handle opening settings via its internal state
+        // We can trigger via a custom event or just rely on the gear icon
       }
     })
 
