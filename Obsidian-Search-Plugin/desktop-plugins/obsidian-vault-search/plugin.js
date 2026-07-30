@@ -220,17 +220,25 @@ function VaultSearchPane({ ctx }) {
   const renderCopyButtons = (filePath, relPath) => jsxs('div', {
     className: 'flex gap-1',
     children: [
-      jsx(Button, {
-        onClick: (e) => { e.stopPropagation(); handleCopyPath(filePath) },
-        variant: 'ghost',
-        size: 'icon-xs',
-        children: jsx(Codicon, { name: 'copy', size: '0.75rem' })
+      jsx(Tip, {
+        label: 'Copy full path',
+        children: jsx(Button, {
+          onClick: (e) => { e.stopPropagation(); handleCopyPath(filePath) },
+          variant: 'ghost',
+          size: 'icon-xs',
+          'aria-label': 'Copy full path',
+          children: jsx(Codicon, { name: 'copy', size: '0.75rem' })
+        })
       }),
-      jsx(Button, {
-        onClick: (e) => { e.stopPropagation(); handleCopyRelPath(relPath) },
-        variant: 'ghost',
-        size: 'icon-xs',
-        children: jsx(Codicon, { name: 'link-external', size: '0.75rem' })
+      jsx(Tip, {
+        label: 'Copy vault-relative path',
+        children: jsx(Button, {
+          onClick: (e) => { e.stopPropagation(); handleCopyRelPath(relPath) },
+          variant: 'ghost',
+          size: 'icon-xs',
+          'aria-label': 'Copy vault-relative path',
+          children: jsx(Codicon, { name: 'link-external', size: '0.75rem' })
+        })
       })
     ]
   })
@@ -246,7 +254,11 @@ function VaultSearchPane({ ctx }) {
             className: 'flex items-center justify-between mb-2',
             children: [
               jsx('div', {
-                className: cn('text-sm font-medium', { color: 'var(--ui-text-primary)' }),
+                className: cn(
+                  'text-xs font-medium uppercase tracking-wider px-3 py-1.5 rounded-lg inline-block',
+                  { color: 'var(--ui-text-tertiary)' }
+                ),
+                style: { backgroundColor: 'var(--chrome-action-hover)' },
                 children: t('paneTitle')
               }),
               jsx(Button, {
@@ -340,31 +352,37 @@ function VaultSearchPane({ ctx }) {
                     results.files?.length > 0 && jsxs('div', {
                       className: 'mb-4',
                       children: [
-                        jsx('div', { className: cn('text-xs font-medium uppercase tracking-wider mb-2', { color: 'var(--ui-text-tertiary)' }), children: `Files (${results.files.length})` }),
+                        jsx('div', {
+                          className: cn(
+                            'text-xs font-medium uppercase tracking-wider mb-2 px-3 py-1.5 rounded-lg inline-block',
+                            { color: 'var(--ui-text-tertiary)' }
+                          ),
+                          style: { backgroundColor: 'var(--chrome-action-hover)' },
+                          children: `Files (${results.files.length})`
+                        }),
                         jsx('div', {
                           className: 'space-y-1 max-h-60 overflow-y-auto',
                           children: results.files.map((file, i) => jsxs('div', {
-                            className: cn('border rounded-md overflow-hidden', { borderColor: 'var(--ui-stroke-secondary)' }),
+                            onClick: () => handleOpenFile(file.path),
+                            className: cn(
+                              'border rounded-xl overflow-hidden cursor-pointer transition-colors',
+                              { borderColor: 'var(--ui-stroke-secondary)' }
+                            ),
+                            style: { '--ui-hover-bg': 'var(--chrome-action-hover)' },
+                            onMouseEnter: (e) => { e.currentTarget.style.backgroundColor = 'var(--chrome-action-hover)' },
+                            onMouseLeave: (e) => { e.currentTarget.style.backgroundColor = '' },
                             children: [
-                              jsx(Button, {
-                                onClick: () => handleOpenFile(file.path),
-                                variant: 'ghost',
-                                className: 'w-full text-left p-2 rounded-t-md border-b justify-start',
-                                style: { borderColor: 'var(--ui-stroke-secondary)' },
-                                children: jsxs('div', {
-                                  className: 'flex flex-col gap-0.5 min-w-0',
-                                  children: [
-                                    jsx('div', { className: cn('font-medium truncate', { color: 'var(--ui-text-primary)' }), children: file.name }),
-                                    file.folder && jsx('div', { className: cn('text-xs truncate', { color: 'var(--ui-text-quaternary)' }), children: file.folder + '/' })
-                                  ]
-                                })
-                              }),
                               jsxs('div', {
-                                className: 'flex items-center justify-between px-2 py-1.5',
-                                style: { backgroundColor: 'var(--ui-background-elevated)' },
+                                className: 'flex items-center gap-2 p-2',
                                 children: [
-                                  jsx('div', { className: 'flex-1 min-w-0' }),
-                                  renderCopyButtons(file.path, file.rel_path)
+                                  jsxs('div', {
+                                    className: 'flex flex-col gap-0.5 min-w-0 flex-1',
+                                    children: [
+                                      jsx('div', { className: cn('font-medium truncate', { color: 'var(--ui-text-primary)' }), children: file.name }),
+                                      file.folder && jsx('div', { className: cn('text-xs truncate', { color: 'var(--ui-text-quaternary)' }), children: file.folder + '/' })
+                                    ]
+                                  }),
+                                  jsx('div', { className: 'flex gap-1 shrink-0', children: renderCopyButtons(file.path, file.rel_path) })
                                 ]
                               })
                             ]
@@ -374,35 +392,40 @@ function VaultSearchPane({ ctx }) {
                     }),
                     results.content?.length > 0 && jsxs('div', {
                       children: [
-                        jsx('div', { className: cn('text-xs font-medium uppercase tracking-wider mb-2', { color: 'var(--ui-text-tertiary)' }), children: `Content Matches (${results.content.length})` }),
+                        jsx('div', {
+                          className: cn(
+                            'text-xs font-medium uppercase tracking-wider mb-2 px-3 py-1.5 rounded-lg inline-block',
+                            { color: 'var(--ui-text-tertiary)' }
+                          ),
+                          style: { backgroundColor: 'var(--chrome-action-hover)' },
+                          children: `Content Matches (${results.content.length})`
+                        }),
                         jsx('div', {
                           className: 'space-y-1 max-h-60 overflow-y-auto',
                           children: results.content.map((match, i) => jsxs('div', {
-                            className: cn('border rounded-md overflow-hidden', { borderColor: 'var(--ui-stroke-secondary)' }),
+                            onClick: () => handleOpenFile(match.path),
+                            className: cn(
+                              'border rounded-xl overflow-hidden cursor-pointer transition-colors',
+                              { borderColor: 'var(--ui-stroke-secondary)' }
+                            ),
+                            onMouseEnter: (e) => { e.currentTarget.style.backgroundColor = 'var(--chrome-action-hover)' },
+                            onMouseLeave: (e) => { e.currentTarget.style.backgroundColor = '' },
                             children: [
-                              jsx(Button, {
-                                onClick: () => handleOpenFile(match.path),
-                                variant: 'ghost',
-                                className: 'w-full text-left p-2 rounded-t-md border-b justify-start',
-                                style: { borderColor: 'var(--ui-stroke-secondary)' },
-                                children: jsxs('div', {
-                                  className: 'flex flex-col gap-0.5 min-w-0',
-                                  children: [
-                                    jsxs('div', { className: 'flex items-center justify-between min-w-0', children: [
-                                      jsx('span', { className: cn('font-medium truncate', { color: 'var(--ui-text-primary)' }), children: match.name }),
-                                      jsx('span', { className: cn('text-xs shrink-0 ml-2', { color: 'var(--ui-text-quaternary)' }), children: `L${match.line_number}` })
-                                    ]}),
-                                    jsx('div', { className: cn('text-xs truncate', { color: 'var(--ui-text-quaternary)' }), children: match.context_line }),
-                                    match.folder && jsx('div', { className: cn('text-xs truncate', { color: 'var(--ui-text-quaternary)' }), children: match.folder + '/' })
-                                  ]
-                                })
-                              }),
                               jsxs('div', {
-                                className: 'flex items-center justify-between px-2 py-1.5',
-                                style: { backgroundColor: 'var(--ui-background-elevated)' },
+                                className: 'flex items-center gap-2 p-2',
                                 children: [
-                                  jsx('div', { className: 'flex-1 min-w-0' }),
-                                  renderCopyButtons(match.path, match.rel_path)
+                                  jsxs('div', {
+                                    className: 'flex flex-col gap-0.5 min-w-0 flex-1',
+                                    children: [
+                                      jsxs('div', { className: 'flex items-center justify-between min-w-0', children: [
+                                        jsx('span', { className: cn('font-medium truncate', { color: 'var(--ui-text-primary)' }), children: match.name }),
+                                        jsx('span', { className: cn('text-xs shrink-0 ml-2', { color: 'var(--ui-text-quaternary)' }), children: `L${match.line_number}` })
+                                      ]}),
+                                      jsx('div', { className: cn('text-xs truncate', { color: 'var(--ui-text-quaternary)' }), children: match.context_line }),
+                                      match.folder && jsx('div', { className: cn('text-xs truncate', { color: 'var(--ui-text-quaternary)' }), children: match.folder + '/' })
+                                    ]
+                                  }),
+                                  jsx('div', { className: 'flex gap-1 shrink-0', children: renderCopyButtons(match.path, match.rel_path) })
                                 ]
                               })
                             ]
