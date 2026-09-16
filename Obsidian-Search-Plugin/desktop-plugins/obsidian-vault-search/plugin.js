@@ -467,24 +467,6 @@ function VaultSearchPane({ ctx }) {
   })
 }
 
-// ─── Statusbar chip ─────────────────────────────────────────────────────────
-function VaultChip() {
-  const t = usePluginI18n(ID)
-
-  return jsx(Tip, {
-    label: t('chipTip'),
-    children: jsx(Button, {
-      variant: 'ghost',
-      size: 'sm',
-      onClick: () => {
-        haptic('tap')
-        host.notify({ kind: 'info', message: t('chipMessage') })
-      },
-      children: '\uD83D\uDCDA Vault'
-    })
-  })
-}
-
 // ─── Plugin registration ────────────────────────────────────────────────────
 export default {
   id: ID,
@@ -540,12 +522,5 @@ export default {
       render: () => jsx(VaultSearchPane, { ctx })
     })
 
-    // Register statusbar chip
-    ctx.register({
-      id: 'vault-chip',
-      area: 'statusBar.right',
-      order: 140,
-      render: () => jsx(VaultChip, {})
-    })
   }
 }
